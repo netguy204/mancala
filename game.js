@@ -112,8 +112,8 @@ Place.prototype.opposite = function() {
  */
 function GameBoard() {
     this.places = [];
-    this.players = [new Player('one', '#ff0000'),
-                    new Player('two', '#00ff00')];
+    this.players = [new Player('Red', '#ff0000'),
+                    new Player('Green', '#00ff00')];
 
     for(var ii = 0; ii < 14; ++ii) {
         var player = this.players[0];
@@ -167,19 +167,27 @@ GameBoard.prototype.extent = function() {
 };
 
 GameBoard.prototype.render = function(canvas) {
-    var winner = this.checkWin();
-    if(winner) {
-        player.textContent = winner.name + ' wins!';
-    } else {
-        player.textContent = this.player().name + "'s turn";
-    }
-
     var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var background = this.extent().scale(this.scale);
+
+    var winner = this.checkWin();
+    ctx.fillStyle = '#999999';
+
+    var str = null;
+    if(winner) {
+        str = winner.name + ' wins!';
+    } else {
+        str = this.player().name + "'s turn";
+    }
+    ctx.font = '60px sans-serif';
+    var str_width = ctx.measureText(str).width;
+    var center = background.center();
+    ctx.fillText(str, center.x - str_width / 2, center.y + 20);
+
     ctx.strokeStyle = '#000000';
     ctx.lineWidth = 3.0;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    var background = this.extent().scale(this.scale);
     ctx.fillStyle = this.color;
     ctx.strokeRect(background.tl.x, background.tl.y, background.width(), background.height());
 
@@ -196,11 +204,11 @@ GameBoard.prototype.render = function(canvas) {
             ctx.strokeRect(rect.tl.x, rect.tl.y, w, h);
         }
 
-        var center = rect.center();
+        center = rect.center();
         ctx.fillStyle = '#000000';
         ctx.font = '30px sans-serif';
 
-        var str = String(place.pieces);
+        str = String(place.pieces);
         var metrics = ctx.measureText(str);
         ctx.fillText(String(place.pieces), center.x - metrics.width / 2, center.y + 10);
     }
@@ -265,7 +273,7 @@ GameBoard.prototype.checkWin = function() {
     }
 };
 
-GameBoard.prototype.clickHandler = function(canvas, player, event) {
+GameBoard.prototype.clickHandler = function(canvas, event) {
     var winner = this.checkWin();
 
     if(!winner) {
@@ -279,6 +287,11 @@ GameBoard.prototype.clickHandler = function(canvas, player, event) {
     }
 
     this.render(canvas);
+};
+
+GameBoard.prototype.scaleToFill = function(canvas) {
+    var width = this.extent().width();
+    this.scale = canvas.width / width;
 };
 
 HTMLCanvasElement.prototype.relMouseCoords = function(event) {
@@ -307,7 +320,21 @@ HTMLCanvasElement.prototype.relMouseCoords = function(event) {
 function init() {
     var gb = new GameBoard();
     var canvas = document.getElementById('board');
-    var player = document.getElementById('player');
-    canvas.onclick = gb.clickHandler.bind(gb, canvas, player);
+
+    canvas.onclick = gb.clickHandler.bind(gb, canvas);
+
+    var onresize = function() {
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+        if(width != canvas.width) {
+            canvas.width = width;
+            canvas.height = height;
+            gb.scaleToFill(canvas);
+            gb.render(canvas);
+        }
+    };
+    onresize();
+    window.onresize = onresize;
     gb.render(canvas);
+
 }
