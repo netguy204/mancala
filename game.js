@@ -6,6 +6,7 @@ function Director() {
 Director.prototype.addNext = function(delay, action) {
     this.events.push(new Event(this, delay, action));
     this.startWaiting();
+    return this;
 };
 
 Director.prototype.isRunning = function() {
@@ -63,8 +64,8 @@ function Rect(tl, br) {
     this.br = br;
 }
 
-Rect.prototype.scale = function(x) {
-    return new Rect(this.tl.scale(x), this.br.scale(x));
+Rect.prototype.scale = function(x, y) {
+    return new Rect(this.tl.scale(x, y), this.br.scale(x, y));
 };
 
 Rect.prototype.width = function() {
@@ -98,8 +99,8 @@ function Vector(x, y) {
     this.y = y;
 }
 
-Vector.prototype.scale = function(x) {
-    return new Vector(this.x * x, this.y * x);
+Vector.prototype.scale = function(x, y) {
+    return new Vector(this.x * x, this.y * y);
 };
 
 function Place(board, player, score_cup, rect, pieces, position) {
@@ -195,8 +196,12 @@ Place.prototype.opposite = function() {
  *
  * Linear numbering begins with P0 and proceeds counter-clockwise.
  */
-function GameBoard(canvas_id) {
-    this.canvas_id = canvas_id;
+var BOARD = 0;
+var PIECE = 1;
+
+function GameBoard(canvas, graphics) {
+    this.canvas = canvas;
+    this.graphics = graphics;
     this.director = new Director();
     this.places = [];
     this.players = [new Player('Red', '#ff0000'),
@@ -233,7 +238,8 @@ function GameBoard(canvas_id) {
     this.current_player_number = 0;
 }
 
-GameBoard.prototype.scale = 70;
+GameBoard.prototype.scaleX = 70;
+GameBoard.prototype.scaleY = 70;
 GameBoard.prototype.color = '#aaaa33';
 GameBoard.prototype.padding = 10;
 
@@ -255,13 +261,11 @@ GameBoard.prototype.extent = function() {
 };
 
 GameBoard.prototype.render = function() {
-    var canvas = document.getElementById(this.canvas_id);
-    var ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    var ctx = this.canvas.getContext('2d');
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    var background = this.extent().scale(this.scale);
-
-    ctx.fillStyle = '#999999';
+    var background = this.extent().scale(this.scaleX, this.scaleY);
+    ctx.drawImage(this.graphics[BOARD], 0, 0, background.width(), background.height());
 
     var str = null;
     if(this.winner) {
@@ -272,10 +276,15 @@ GameBoard.prototype.render = function() {
     ctx.font = '60px sans-serif';
     var str_width = ctx.measureText(str).width;
     var center = background.center();
+
+    ctx.fillStyle = '#000000';
+    ctx.fillText(str, center.x - str_width / 2, center.y + 19);
+
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillText(str, center.x - str_width / 2, center.y + 20);
 
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 3.0;
+    ctx.lineWidth = 1.0;
 
     ctx.fillStyle = this.color;
     ctx.strokeRect(background.tl.x, background.tl.y, background.width(), background.height());
@@ -284,22 +293,24 @@ GameBoard.prototype.render = function() {
         var place = this.places[ii];
         ctx.fillStyle = place.player.color;
         ctx.strokeStyle = place.player.color;
-        var rect = place.rect.scale(this.scale);
+        var rect = place.rect.scale(this.scaleX, this.scaleY);
         var w = rect.width();
         var h = rect.height();
-        if(place.score_cup) {
-            ctx.fillRect(rect.tl.x, rect.tl.y, w, h);
-        } else {
-            ctx.strokeRect(rect.tl.x, rect.tl.y, w, h);
+        ctx.strokeRect(rect.tl.x, rect.tl.y, w, h);
+
+        if(place.pieces > 0) {
+            ctx.drawImage(this.graphics[PIECE], rect.tl.x, rect.tl.y, w, h);
+
+            center = rect.center();
+            ctx.font = '60px sans-serif';
+
+            str = String(place.pieces);
+            var metrics = ctx.measureText(str);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText(String(place.pieces), center.x - metrics.width / 2, center.y + 20);
+            ctx.fillStyle = '#000000';
+            ctx.fillText(String(place.pieces), center.x - metrics.width / 2, center.y + 19);
         }
-
-        center = rect.center();
-        ctx.fillStyle = '#000000';
-        ctx.font = '30px sans-serif';
-
-        str = String(place.pieces);
-        var metrics = ctx.measureText(str);
-        ctx.fillText(String(place.pieces), center.x - metrics.width / 2, center.y + 10);
     }
 };
 
@@ -371,7 +382,7 @@ GameBoard.prototype.clickHandler = function(canvas, event) {
 
     for(var ii = 0; ii < this.places.length; ++ii) {
         var place = this.places[ii];
-        if(place.rect.scale(this.scale).contains(canvas.relMouseCoords(event))) {
+        if(place.rect.scale(this.scaleX, this.scaleY).contains(canvas.relMouseCoords(event))) {
             place.click();
             break;
         }
@@ -381,8 +392,11 @@ GameBoard.prototype.clickHandler = function(canvas, event) {
 };
 
 GameBoard.prototype.scaleToFill = function(canvas) {
-    var width = this.extent().width();
-    this.scale = canvas.width / width;
+    var extent = this.extent();
+    var width = extent.width();
+    var height = extent.height();
+    this.scaleX = canvas.width / width;
+    this.scaleY = canvas.height / height;
 };
 
 HTMLCanvasElement.prototype.relMouseCoords = function(event) {
@@ -408,10 +422,47 @@ HTMLCanvasElement.prototype.relMouseCoords = function(event) {
     return new Vector(canvasX, canvasY);
 };
 
+function drawLoading(canvas) {
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = '30px sans-serif';
+    ctx.fillStyle = '#666666';
+    ctx.fillText("Loading...", 0, canvas.height / 2 + 10);
+}
+
+function storeImage(url, ev, name, target) {
+    var img = new Image();
+    img.onload = function() {
+        target[name] = img;
+        ev.complete();
+    };
+    img.src = url;
+}
+
 function init() {
     var canvas = document.getElementById('board');
-    var gb = new GameBoard('board');
+    drawLoading(canvas);
 
+    var graphics = {};
+
+    var loader = new Director();
+    loader.addNext(0, function(ev) {
+        storeImage('board.png', ev, BOARD, graphics);
+    }).addNext(0, function(ev) {
+        storeImage('piece.png', ev, PIECE, graphics);
+    }).addNext(0, function(ev) {
+        startGame(canvas, graphics);
+        ev.complete();
+    });
+}
+
+function startGame(canvas, graphics) {
+    var gb = new GameBoard(canvas, graphics);
+
+    // disable touch dragging
+    document.ontouchmove = function(e) {
+        e.preventDefault();
+    };
     canvas.onclick = gb.clickHandler.bind(gb, canvas);
 
     var onresize = function() {
