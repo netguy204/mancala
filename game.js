@@ -160,13 +160,19 @@ Place.prototype.click = function() {
             opposite.pieces = 0;
             ev.complete();
         });
-    } else if(place.score_cup && place.player == this.player) {
-        // we get another move
-        return;
     }
 
+    if(!(place.score_cup && place.player == this.player)) {
+        // we don't get another move
+        this.director().addNext(this.step_delay, function(ev) {
+            self.board.advancePlayer();
+            ev.complete();
+        });
+    }
+
+    // win check after animation completes
     this.director().addNext(this.step_delay, function(ev) {
-        self.board.advancePlayer();
+        self.board.winner = self.board.checkWin();
         ev.complete();
     });
 };
@@ -195,6 +201,7 @@ function GameBoard(canvas_id) {
     this.places = [];
     this.players = [new Player('Red', '#ff0000'),
                     new Player('Green', '#00ff00')];
+    this.winner = null;
 
     for(var ii = 0; ii < 14; ++ii) {
         var player = this.players[0];
@@ -254,12 +261,11 @@ GameBoard.prototype.render = function() {
 
     var background = this.extent().scale(this.scale);
 
-    var winner = this.checkWin();
     ctx.fillStyle = '#999999';
 
     var str = null;
-    if(winner) {
-        str = winner.name + ' wins!';
+    if(this.winner) {
+        str = this.winner.name + ' wins!';
     } else {
         str = this.player().name + "'s turn";
     }
@@ -355,22 +361,19 @@ GameBoard.prototype.checkWin = function() {
         }
     }
 
-    return false;
+    return null;
 };
 
 GameBoard.prototype.clickHandler = function(canvas, event) {
     // no clicks if we're animating
     if(this.director.isRunning()) return true;
+    if(this.winner) return true;
 
-    var winner = this.checkWin();
-
-    if(!winner) {
-        for(var ii = 0; ii < this.places.length; ++ii) {
-            var place = this.places[ii];
-            if(place.rect.scale(this.scale).contains(canvas.relMouseCoords(event))) {
-                place.click();
-                break;
-            }
+    for(var ii = 0; ii < this.places.length; ++ii) {
+        var place = this.places[ii];
+        if(place.rect.scale(this.scale).contains(canvas.relMouseCoords(event))) {
+            place.click();
+            break;
         }
     }
 
