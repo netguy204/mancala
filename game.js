@@ -1,4 +1,56 @@
-function Stone() {
+function Director() {
+    this.events = [];
+    this.running = false;
+};
+
+Director.prototype.addNext = function(delay, action) {
+    this.events.push(new Event(this, delay, action));
+    this.startWaiting();
+};
+
+Director.prototype.isRunning = function() {
+    return !!this.running;
+};
+
+Director.prototype.startWaiting = function() {
+    if(!this.running && this.events.length > 0) {
+        this.running = this.events.shift();
+        this.running.start();
+    }
+};
+
+Director.prototype.clear = function() {
+    if(!this.running) {
+        this.running.cancel();
+    }
+    this.events = [];
+};
+
+Director.prototype.eventComplete = function() {
+    this.running = false;
+    this.startWaiting();
+};
+
+function Event(director, delay, action) {
+    this.director = director;
+    this.delay = delay;
+    this.action = action;
+    this.timer = null;
+};
+
+Event.prototype.start = function() {
+    var self = this;
+    this.timer = setTimeout(function() {
+        self.action(self);
+    }, this.delay);
+};
+
+Event.prototype.cancel = function() {
+    clearTimeout(this.timer);
+};
+
+Event.prototype.complete = function() {
+    this.director.eventComplete();
 };
 
 function Player(name, color) {
@@ -59,6 +111,12 @@ function Place(board, player, score_cup, rect, pieces, position) {
     this.position = position;
 };
 
+Place.prototype.director = function() {
+    return this.board.director;
+};
+
+Place.prototype.step_delay = 300;
+
 Place.prototype.click = function() {
     // valid move?
     if(this.score_cup) return;
@@ -72,24 +130,45 @@ Place.prototype.click = function() {
     // distribute the pieces
     var pieces = this.pieces;
     var place = null;
-    this.pieces = 0;
-    for(var ii = 1; ii <= pieces; ++ii) {
+
+    var self = this;
+    this.director().addNext(0, function(ev) {
+        self.pieces = 0;
+        ev.complete();
+    });
+    var ii = 0;
+    while(pieces > 0) {
+        ii += 1;
         var place_idx = (this.position + ii) % this.board.places.length;
         place = this.place(place_idx);
-        place.pieces += 1;
+        if(!place.score_cup || place.player == this.player) {
+            pieces -= 1;
+            (function(place) {
+                self.director().addNext(self.step_delay, function(ev) {
+                    place.pieces += 1;
+                    ev.complete();
+                });
+            })(place);
+        }
     }
 
     // do we get a steal
-    if(!place.score_cup && place.pieces == 1) {
+    if(!place.score_cup && place.pieces == 0 && place.player == this.player) {
         var opposite = place.opposite();
-        this.board.scoreCup(this.player).pieces += opposite.pieces;
-        opposite.pieces = 0;
+        this.director().addNext(this.step_delay, function(ev) {
+            self.board.scoreCup(self.player).pieces += opposite.pieces;
+            opposite.pieces = 0;
+            ev.complete();
+        });
     } else if(place.score_cup && place.player == this.player) {
         // we get another move
         return;
     }
 
-    this.board.advancePlayer();
+    this.director().addNext(this.step_delay, function(ev) {
+        self.board.advancePlayer();
+        ev.complete();
+    });
 };
 
 Place.prototype.place = function(idx) {
@@ -110,7 +189,9 @@ Place.prototype.opposite = function() {
  *
  * Linear numbering begins with P0 and proceeds counter-clockwise.
  */
-function GameBoard() {
+function GameBoard(canvas_id) {
+    this.canvas_id = canvas_id;
+    this.director = new Director();
     this.places = [];
     this.players = [new Player('Red', '#ff0000'),
                     new Player('Green', '#00ff00')];
@@ -166,9 +247,11 @@ GameBoard.prototype.extent = function() {
     return rect;
 };
 
-GameBoard.prototype.render = function(canvas) {
+GameBoard.prototype.render = function() {
+    var canvas = document.getElementById(this.canvas_id);
     var ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     var background = this.extent().scale(this.scale);
 
     var winner = this.checkWin();
@@ -240,7 +323,7 @@ GameBoard.prototype.checkWin = function() {
         have_winner = true;
 
         // sweep player 2's pieces into their goal
-        for(var ii = 7; ii < 13; ++ii) {
+        for(ii = 7; ii < 13; ++ii) {
             this.places[this.P2_GOAL].pieces += this.places[ii].pieces;
             this.places[ii].pieces = 0;
         }
@@ -248,7 +331,7 @@ GameBoard.prototype.checkWin = function() {
 
     // check to see if player 2 has remaining moves
     all_blank = true;
-    for(var ii = 7; ii < 13; ++ii) {
+    for(ii = 7; ii < 13; ++ii) {
         if(this.places[ii].pieces > 0) {
             all_blank = false;
         }
@@ -258,7 +341,7 @@ GameBoard.prototype.checkWin = function() {
         have_winner = true;
 
         // sweep player 1's pieces into their goal
-        for(var ii = 0; ii < 6; ++ii) {
+        for(ii = 0; ii < 6; ++ii) {
             this.places[this.P1_GOAL].pieces += this.places[ii].pieces;
             this.places[ii].pieces = 0;
         }
@@ -271,9 +354,14 @@ GameBoard.prototype.checkWin = function() {
             return this.players[0];
         }
     }
+
+    return false;
 };
 
 GameBoard.prototype.clickHandler = function(canvas, event) {
+    // no clicks if we're animating
+    if(this.director.isRunning()) return true;
+
     var winner = this.checkWin();
 
     if(!winner) {
@@ -286,7 +374,7 @@ GameBoard.prototype.clickHandler = function(canvas, event) {
         }
     }
 
-    this.render(canvas);
+    return true;
 };
 
 GameBoard.prototype.scaleToFill = function(canvas) {
@@ -318,8 +406,8 @@ HTMLCanvasElement.prototype.relMouseCoords = function(event) {
 };
 
 function init() {
-    var gb = new GameBoard();
     var canvas = document.getElementById('board');
+    var gb = new GameBoard('board');
 
     canvas.onclick = gb.clickHandler.bind(gb, canvas);
 
@@ -330,11 +418,22 @@ function init() {
             canvas.width = width;
             canvas.height = height;
             gb.scaleToFill(canvas);
-            gb.render(canvas);
         }
     };
+
     onresize();
     window.onresize = onresize;
-    gb.render(canvas);
 
+    // set up render loop. pretty wasteful given how rarely what we
+    // render changes but safari isn't reliable otherwise.
+    var onFrame = window.requestAnimationFrame ||
+            window.mozRequestAnimationFrame ||
+            window.webkitRequestAnimationFrame;
+
+
+    var render = function() {
+        gb.render();
+        onFrame(render);
+    };
+    render();
 }
